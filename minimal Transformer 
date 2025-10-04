@@ -1,0 +1,41 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import math
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, max_len=512):
+        super().__init__()
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2) *-(math.log(10000.0)/d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        self.pe = pe.unsqueeze(0)
+    def forward(self, x):
+        return x + self.pe[:, :x.size(1)].to(x.device)
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, d_model, n_heads):
+        super().__init__()
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.head_dim = d_model // n_heads
+        assert self.head_dim * n_heads == d_model
+        self.qkv = nn.Linear(d_model, d_model*3)
+        self.fc_out = nn.Linear(d_model, d_model)
+    def forward(self, x, mask=None):
+        B, L, D = x.shape
+        qkv = self.qkv(x).reshape(B, L, 3, self.n_heads, self.head_dim)
+        q, k, v = qkv[:,:,0], qkv[:,:,1], qkv[:,:,2]
+        q, k, v = [t.transpose(1,2) for t in (q, k, v)]
+        scores = torch.einsum('bhqd,bhkd->bhqk', q, k) / math.sqrt(self.head_dim)
+        if mask is not None:
+            scores = scores.masked_fill(mask == 0, -1e9)
+        attn = scores.softmax(-1)
+        out = torch.einsum('bhqk,bhvd->bhqd', attn, v)
+        out = out.transpose(1,2).reshape(B, L, D)
+        return self.fc_out(out)
+
+# Encoder, Decoder, and full Transformer omitted for brevity.
+# See public repos for full training and loop integration.
